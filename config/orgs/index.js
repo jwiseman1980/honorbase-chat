@@ -6,7 +6,7 @@ export { drmfConfig, steelHeartsConfig };
 // All orgs keyed by orgId
 export const orgs = {
   drmf: drmfConfig,
-  steelhearts: steelHeartsConfig,
+  "steel-hearts": steelHeartsConfig,
 };
 
 // Special admin users who can access all orgs

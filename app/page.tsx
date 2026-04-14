@@ -26,9 +26,23 @@ function LoadingScreen() {
 }
 
 // ─── Admin org picker ─────────────────────────────────────────────────────────
+// subtitle = the end-user for that org (shown in picker so Joseph knows who uses it)
+// adminGreeting = what Joseph sees in the empty chat when he enters as admin
 const ADMIN_ORGS = [
-  { id: "drmf", name: "Drew Ross Memorial Foundation", subtitle: "Sarah Ross Geisen · DRMF", color: "#c5a55a" },
-  { id: "steelhearts", name: "Steel Hearts Foundation", subtitle: "Kristin Hughes · Board Member", color: "#dc2626" },
+  {
+    id: "drmf",
+    name: "Drew Ross Memorial Foundation",
+    subtitle: "Sarah Ross Geisen · Executive Director",
+    adminGreeting: "Joseph Wiseman · Platform Admin — DRMF workspace",
+    color: "#c5a55a",
+  },
+  {
+    id: "steel-hearts",
+    name: "Steel Hearts Foundation",
+    subtitle: "Kristin Hughes · Board Member",
+    adminGreeting: "Joseph Wiseman · Founder & Platform Admin",
+    color: "#dc2626",
+  },
 ];
 
 function AdminPicker({ onSelect }: { onSelect: (orgId: string) => void }) {
@@ -441,7 +455,7 @@ function ChatGate() {
     return (
       <ChatApp
         orgId={adminOrg}
-        greeting={adminOrgConfig?.subtitle ?? ""}
+        greeting={adminOrgConfig?.adminGreeting ?? adminOrgConfig?.name ?? ""}
         accentColor={adminOrgConfig?.color ?? "#c5a55a"}
         onBack={() => setAdminOrg(null)}
       />

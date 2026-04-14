@@ -3,23 +3,26 @@ import Google from "next-auth/providers/google";
 
 // ─── User whitelist ───────────────────────────────────────────────────────────
 // Maps email → org config. Add new users here.
-// orgId: null means superadmin (sees org picker)
+// orgId: "all" means superadmin (sees org picker)
 const WHITELIST = {
   "joseph.wiseman@steel-hearts.org": {
-    orgId: null as null,
+    name: "Joseph Wiseman",
+    orgId: "all" as const,
     role: "superadmin" as const,
     greeting: "Hi Joseph — Platform Admin",
     accentColor: "#c5a55a",
   },
   "kristin.hughes@steel-hearts.org": {
-    orgId: "steelhearts",
-    role: "fulfillment" as const,
+    name: "Kristin Hughes",
+    orgId: "steel-hearts" as const,
+    role: "shipping" as const,
     greeting: "Hi Kristin — your Steel Hearts Operator is ready. What do you need?",
     accentColor: "#dc2626",
   },
   "sarah@drewross.org": {
-    orgId: "drmf",
-    role: "executive_director" as const,
+    name: "Sarah Ross Geisen",
+    orgId: "drmf" as const,
+    role: "executive-director" as const,
     greeting: "Hi Sarah — I know your org, I know what's coming up. What do you need help with most right now?",
     accentColor: "#c5a55a",
   },
@@ -48,8 +51,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return !!(user.email && user.email in WHITELIST);
     },
     jwt({ token, user }) {
-      if (user?.email && user.email in WHITELIST) {
-        token.userConfig = WHITELIST[user.email as keyof typeof WHITELIST];
+      // Always re-read from whitelist so config changes take effect without re-login
+      const email = (user?.email ?? token.email) as string | undefined;
+      if (email && email in WHITELIST) {
+        token.userConfig = WHITELIST[email as keyof typeof WHITELIST];
+        token.email = email;
       }
       return token;
     },

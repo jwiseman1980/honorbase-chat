@@ -9,7 +9,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
-const TOOLS: Anthropic.Tool[] = [
+const ALL_TOOLS: Anthropic.Tool[] = [
   {
     name: "web_fetch",
     description:
@@ -34,16 +34,113 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "gmail",
+    description:
+      "Read emails from the connected Gmail account. Use to list recent emails (with optional search query) or read a specific email by ID. Use proactively when the user asks about email, messages, or anything that might be in their inbox.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list_recent", "read"],
+          description: "list_recent: list emails matching a query. read: read a specific email by message_id.",
+        },
+        query: {
+          type: "string",
+          description: "Gmail search query (e.g. 'is:unread', 'from:someone@example.com', 'subject:meeting'). Used for list_recent.",
+        },
+        message_id: {
+          type: "string",
+          description: "The Gmail message ID to read in full. Used for read action.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "google_calendar",
+    description:
+      "View upcoming events from the connected Google Calendar. Returns events for the next N days.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        days_ahead: {
+          type: "number",
+          description: "How many days ahead to look for events (default: 7, max: 30).",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "slack",
+    description:
+      "Read messages from the connected Slack workspace. List channels or read recent messages from a specific channel.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list_channels", "read_channel"],
+          description: "list_channels: list all channels. read_channel: read recent messages from a channel.",
+        },
+        channel: {
+          type: "string",
+          description: "Channel name (e.g. 'general') or Slack channel ID. Required for read_channel.",
+        },
+      },
+      required: ["action"],
+    },
+  },
 ];
+
+// ── Google service account auth ───────────────────────────────────────────────
+
+async function getGoogleAccessToken(impersonateEmail: string, scope: string): Promise<string | null> {
+  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!keyJson) return null;
+  try {
+    const { createSign } = await import("crypto");
+    const key = JSON.parse(keyJson);
+    const now = Math.floor(Date.now() / 1000);
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({
+        iss: key.client_email,
+        sub: impersonateEmail,
+        scope,
+        aud: "https://oauth2.googleapis.com/token",
+        iat: now,
+        exp: now + 3600,
+      })
+    ).toString("base64url");
+    const sign = createSign("RSA-SHA256");
+    sign.update(`${header}.${payload}`);
+    const sig = sign.sign(key.private_key, "base64url");
+    const jwt = `${header}.${payload}.${sig}`;
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    return data.access_token || null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Tool execution ────────────────────────────────────────────────────────────
 
 async function executeTool(
   name: string,
-  input: Record<string, string>
+  input: Record<string, unknown>,
+  orgEmail?: string
 ): Promise<string> {
   if (name === "web_fetch") {
-    const { url } = input;
+    const url = input.url as string;
     try {
       const res = await fetch(url, {
         headers: {
@@ -67,7 +164,7 @@ async function executeTool(
   }
 
   if (name === "web_search") {
-    const { query } = input;
+    const query = input.query as string;
     try {
       const encoded = encodeURIComponent(query);
       const res = await fetch(
@@ -83,7 +180,6 @@ async function executeTool(
       );
       const html = await res.text();
 
-      // Extract result snippets from DuckDuckGo Lite HTML
       const results: string[] = [];
       const titleRe = /class="result__title"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
       const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
@@ -110,7 +206,6 @@ async function executeTool(
       }
 
       if (results.length === 0) {
-        // Fallback: return plain text from the page
         const plain = html
           .replace(/<[^>]+>/g, " ")
           .replace(/\s+/g, " ")
@@ -123,7 +218,215 @@ async function executeTool(
     }
   }
 
-  return "Unknown tool";
+  if (name === "gmail") {
+    if (!orgEmail) return "Gmail is not configured for this organization.";
+    const token = await getGoogleAccessToken(
+      orgEmail,
+      "https://www.googleapis.com/auth/gmail.readonly"
+    );
+    if (!token) return "Gmail not available — GOOGLE_SERVICE_ACCOUNT_KEY is not configured.";
+
+    const action = input.action as string;
+
+    if (action === "read") {
+      const messageId = input.message_id as string;
+      if (!messageId) return "message_id is required for read action.";
+      try {
+        const res = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12000) }
+        );
+        const msg = await res.json();
+        const headers: Array<{ name: string; value: string }> = msg.payload?.headers || [];
+        const subject = headers.find((h) => h.name === "Subject")?.value || "(no subject)";
+        const from = headers.find((h) => h.name === "From")?.value || "";
+        const date = headers.find((h) => h.name === "Date")?.value || "";
+
+        function extractBody(part: { mimeType?: string; body?: { data?: string }; parts?: unknown[] }): string {
+          if (part.mimeType === "text/plain" && part.body?.data) {
+            return Buffer.from(part.body.data, "base64").toString("utf-8");
+          }
+          if (part.parts) {
+            for (const p of part.parts as typeof part[]) {
+              const b = extractBody(p);
+              if (b) return b;
+            }
+          }
+          return "";
+        }
+        const body = extractBody(msg.payload || {}).slice(0, 4000);
+        return `From: ${from}\nDate: ${date}\nSubject: ${subject}\n\n${body}`;
+      } catch (err) {
+        return `Failed to read email: ${err instanceof Error ? err.message : "unknown error"}`;
+      }
+    }
+
+    // Default: list_recent
+    const query = (input.query as string) || "in:inbox";
+    try {
+      const listRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=${encodeURIComponent(query)}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12000) }
+      );
+      const listData = await listRes.json();
+      const messageIds: Array<{ id: string }> = (listData.messages || []).slice(0, 10);
+      if (messageIds.length === 0) return `No emails found for query: ${query}`;
+
+      const details = await Promise.all(
+        messageIds.map(async ({ id }) => {
+          const r = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+          );
+          const m = await r.json();
+          const hdrs: Array<{ name: string; value: string }> = m.payload?.headers || [];
+          return {
+            id,
+            subject: hdrs.find((h) => h.name === "Subject")?.value || "(no subject)",
+            from: hdrs.find((h) => h.name === "From")?.value || "",
+            date: hdrs.find((h) => h.name === "Date")?.value || "",
+            snippet: (m.snippet || "") as string,
+          };
+        })
+      );
+
+      return details
+        .map(
+          (m, i) =>
+            `${i + 1}. **${m.subject}**\n   From: ${m.from}\n   Date: ${m.date}\n   ID: ${m.id}\n   ${m.snippet}`
+        )
+        .join("\n\n");
+    } catch (err) {
+      return `Failed to list emails: ${err instanceof Error ? err.message : "unknown error"}`;
+    }
+  }
+
+  if (name === "google_calendar") {
+    if (!orgEmail) return "Google Calendar is not configured for this organization.";
+    const token = await getGoogleAccessToken(
+      orgEmail,
+      "https://www.googleapis.com/auth/calendar.readonly"
+    );
+    if (!token) return "Google Calendar not available — GOOGLE_SERVICE_ACCOUNT_KEY is not configured.";
+
+    const daysAhead = Math.min(Number(input.days_ahead) || 7, 30);
+    const now = new Date();
+    const end = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+          `timeMin=${encodeURIComponent(now.toISOString())}&` +
+          `timeMax=${encodeURIComponent(end.toISOString())}&` +
+          `singleEvents=true&orderBy=startTime&maxResults=20`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12000) }
+      );
+      const data = await res.json();
+      const events: Array<{
+        summary?: string;
+        start?: { dateTime?: string; date?: string };
+        location?: string;
+        description?: string;
+      }> = data.items || [];
+
+      if (events.length === 0) return `No events in the next ${daysAhead} days.`;
+
+      return events
+        .map((e) => {
+          const start = e.start?.dateTime || e.start?.date || "Unknown";
+          const startFormatted = new Date(start).toLocaleString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          const lines = [`• **${e.summary || "(untitled)"}** — ${startFormatted}`];
+          if (e.location) lines.push(`  Location: ${e.location}`);
+          if (e.description) lines.push(`  ${e.description.slice(0, 120)}`);
+          return lines.join("\n");
+        })
+        .join("\n\n");
+    } catch (err) {
+      return `Failed to fetch calendar: ${err instanceof Error ? err.message : "unknown error"}`;
+    }
+  }
+
+  if (name === "slack") {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) return "Slack not available — SLACK_BOT_TOKEN is not configured.";
+
+    const action = input.action as string;
+
+    if (action === "list_channels") {
+      try {
+        const res = await fetch(
+          "https://slack.com/api/conversations.list?limit=100&types=public_channel,private_channel",
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+        );
+        const data = await res.json();
+        if (!data.ok) return `Slack error: ${data.error}`;
+        const channels: Array<{ name: string; is_private: boolean; num_members: number; is_archived: boolean }> =
+          (data.channels || []).filter((c: { is_archived: boolean }) => !c.is_archived);
+        return channels
+          .map((c) => `• #${c.name}${c.is_private ? " 🔒" : ""} — ${c.num_members || 0} members`)
+          .join("\n");
+      } catch (err) {
+        return `Failed to list Slack channels: ${err instanceof Error ? err.message : "unknown error"}`;
+      }
+    }
+
+    if (action === "read_channel") {
+      const channelInput = (input.channel as string) || "";
+      if (!channelInput) return "channel is required for read_channel action.";
+      try {
+        let channelId = channelInput.startsWith("C") ? channelInput : "";
+        if (!channelId) {
+          const listRes = await fetch(
+            "https://slack.com/api/conversations.list?limit=200",
+            { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+          );
+          const listData = await listRes.json();
+          const found = (listData.channels || []).find(
+            (c: { name: string; id: string }) => c.name === channelInput.replace(/^#/, "")
+          );
+          channelId = found?.id || "";
+        }
+        if (!channelId) return `Channel "${channelInput}" not found in this workspace.`;
+
+        const res = await fetch(
+          `https://slack.com/api/conversations.history?channel=${channelId}&limit=25`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+        );
+        const data = await res.json();
+        if (!data.ok) return `Slack error: ${data.error}`;
+
+        const messages: Array<{ ts: string; username?: string; user?: string; text?: string }> = (
+          data.messages || []
+        ).reverse();
+        if (messages.length === 0) return `No recent messages in #${channelInput}.`;
+
+        return messages
+          .map((m) => {
+            const time = new Date(parseFloat(m.ts) * 1000).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            });
+            const user = m.username || m.user || "unknown";
+            return `[${time}] ${user}: ${(m.text || "").slice(0, 300)}`;
+          })
+          .join("\n");
+      } catch (err) {
+        return `Failed to read Slack channel: ${err instanceof Error ? err.message : "unknown error"}`;
+      }
+    }
+
+    return "Unknown Slack action.";
+  }
+
+  return "That tool isn't available. Let the user know gracefully and redirect to what you can help with.";
 }
 
 // ── Message type helpers ──────────────────────────────────────────────────────
@@ -175,6 +478,8 @@ function toAnthropicMessages(
 async function runAgentLoop(
   messages: Anthropic.MessageParam[],
   systemPrompt: string,
+  tools: Anthropic.Tool[],
+  orgEmail: string | undefined,
   onTool: (name: string) => void
 ): Promise<string> {
   let current = [...messages];
@@ -185,7 +490,7 @@ async function runAgentLoop(
       max_tokens: 4096,
       system: systemPrompt,
       messages: current,
-      tools: TOOLS,
+      tools,
     });
 
     if (response.stop_reason === "end_turn") {
@@ -205,7 +510,8 @@ async function runAgentLoop(
           onTool(tool.name);
           const result = await executeTool(
             tool.name,
-            tool.input as Record<string, string>
+            tool.input as Record<string, unknown>,
+            orgEmail
           );
           return {
             type: "tool_result" as const,
@@ -284,6 +590,11 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Filter tools based on org's disabledTools list
+  const disabledTools: string[] = org.disabledTools || [];
+  const orgTools = ALL_TOOLS.filter((t) => !disabledTools.includes(t.name));
+  const orgEmail: string | undefined = org.googleWorkspaceEmail;
+
   const anthropicMessages = toAnthropicMessages(messages);
   const encoder = new TextEncoder();
 
@@ -300,6 +611,8 @@ export async function POST(req: NextRequest) {
         const fullText = await runAgentLoop(
           anthropicMessages,
           org.systemPrompt,
+          orgTools,
+          orgEmail,
           (toolName) => {
             toolsUsed.push(toolName);
             controller.enqueue(

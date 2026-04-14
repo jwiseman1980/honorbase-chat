@@ -483,7 +483,15 @@ function ChatGate() {
 
   // Superadmin sees org picker
   if (userConfig.role === "superadmin") {
-    if (!adminOrg) return <AdminPicker onSelect={setAdminOrg} />;
+    if (!adminOrg) return (
+      <AdminPicker onSelect={(id) => {
+        if (id === "steel-hearts") {
+          window.location.href = "https://shos-app.vercel.app";
+          return;
+        }
+        setAdminOrg(id);
+      }} />
+    );
     if (adminOrg === "honorbase") return <HonorBasePlatform onBack={() => setAdminOrg(null)} />;
     const adminOrgConfig = ADMIN_ORGS.find((o) => o.id === adminOrg)!;
     return (

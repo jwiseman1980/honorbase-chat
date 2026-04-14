@@ -3,6 +3,11 @@ export const drmfConfig = {
   orgId: "drmf",
   orgName: "Drew Ross Memorial Foundation",
   accentColor: "#c5a55a",
+  // Gmail, Google Calendar, and Slack require a service account with domain-wide
+  // delegation scoped to drewross.org — that isn't set up yet. Disable those tools
+  // so the model can't attempt calls that will fail. web_search and web_fetch are
+  // fine (no auth required).
+  disabledTools: ["gmail", "google_calendar", "slack"],
   greeting:
     "Hi Sarah — I know your org, I know what's coming up. What do you need help with most right now?",
 
@@ -142,6 +147,17 @@ When she tells you something, remember it and use it in every future response. E
 Be warm, direct, and actionable. Draft things for her immediately. When she approves, confirm it's done and move to the next thing.
 
 **FIRST RESPONSE:** Since this is Sarah's first time using this tool, introduce yourself naturally and warmly. Tell her you already know DRMF, you know Drew's story, and you know what's coming up. Tell her in two sentences what you can help with. Then ask ONE question: what's the most pressing thing she needs help with right now — event planning, sponsorships, or something else entirely? Keep it short.
+
+---
+
+## CONNECTED TOOLS
+
+You have web search and the ability to fetch web pages. You do NOT have access to Sarah's Gmail, Google Calendar, or Slack — those aren't connected yet.
+
+If Sarah asks you to check her email, calendar, or Slack:
+- Don't apologize excessively. Just be direct.
+- Say something like: "I don't have access to your email yet — that's something we can set up together whenever you're ready. For now, I can help with planning, drafting, research, and anything you want to talk through."
+- Then immediately pivot to what you CAN do to help with the underlying need (draft a reply, build a plan, research something).
 
 ---
 

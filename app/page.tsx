@@ -26,22 +26,27 @@ function LoadingScreen() {
 }
 
 // ─── Admin org picker ─────────────────────────────────────────────────────────
-// subtitle = the end-user for that org (shown in picker so Joseph knows who uses it)
-// adminGreeting = what Joseph sees in the empty chat when he enters as admin
 const ADMIN_ORGS = [
   {
     id: "drmf",
     name: "Drew Ross Memorial Foundation",
-    subtitle: "Sarah Ross Geisen · Executive Director",
+    subtitle: "Joseph Wiseman · Platform Admin",
     adminGreeting: "Joseph Wiseman · Platform Admin — DRMF workspace",
     color: "#c5a55a",
   },
   {
     id: "steel-hearts",
     name: "Steel Hearts Foundation",
-    subtitle: "Kristin Hughes · Board Member",
+    subtitle: "Joseph Wiseman · Founder",
     adminGreeting: "Joseph Wiseman · Founder & Platform Admin",
     color: "#dc2626",
+  },
+  {
+    id: "honorbase",
+    name: "HonorBase Platform",
+    subtitle: "Joseph Wiseman · Architect",
+    adminGreeting: "Joseph Wiseman · Architect",
+    color: "#6366f1",
   },
 ];
 
@@ -332,7 +337,7 @@ function ChatApp({
             All orgs
           </button>
           <span className="text-gray-600 text-sm">·</span>
-          <span className="text-gray-400 text-sm">{orgId === "drmf" ? "DRMF" : "Steel Hearts"}</span>
+          <span className="text-gray-400 text-sm">{orgId === "drmf" ? "DRMF" : orgId === "honorbase" ? "HonorBase" : "Steel Hearts"}</span>
         </div>
       )}
 
@@ -410,7 +415,7 @@ function ChatApp({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={`Message ${orgId === "drmf" ? "DRMF" : "Steel Hearts"} Operator...`}
+            placeholder={`Message ${orgId === "drmf" ? "DRMF" : orgId === "honorbase" ? "HonorBase" : "Steel Hearts"} Operator...`}
             rows={1}
             className="flex-1 resize-none bg-input-field rounded-2xl px-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none border border-white/5 focus:border-gold/30 transition-colors leading-relaxed max-h-40"
           />
@@ -437,6 +442,34 @@ function ChatApp({
   );
 }
 
+// ─── HonorBase Platform placeholder ──────────────────────────────────────────
+function HonorBasePlatform({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="flex flex-col h-dvh bg-app-bg">
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-white/5">
+        <button
+          onClick={onBack}
+          className="text-gray-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          All orgs
+        </button>
+        <span className="text-gray-600 text-sm">·</span>
+        <span className="text-gray-400 text-sm">HonorBase Platform</span>
+      </div>
+      <div className="flex flex-col items-center justify-center flex-1 text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mb-4">
+          <span className="text-indigo-400 text-xl font-bold">H</span>
+        </div>
+        <p className="text-white text-base font-semibold mb-2">HonorBase Platform</p>
+        <p className="text-gray-500 text-sm max-w-xs">Architect view — coming soon.</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Session-based gate ───────────────────────────────────────────────────────
 
 function ChatGate() {
@@ -451,6 +484,7 @@ function ChatGate() {
   // Superadmin sees org picker
   if (userConfig.role === "superadmin") {
     if (!adminOrg) return <AdminPicker onSelect={setAdminOrg} />;
+    if (adminOrg === "honorbase") return <HonorBasePlatform onBack={() => setAdminOrg(null)} />;
     const adminOrgConfig = ADMIN_ORGS.find((o) => o.id === adminOrg)!;
     return (
       <ChatApp

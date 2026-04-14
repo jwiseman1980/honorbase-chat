@@ -1,0 +1,21 @@
+[
+  {
+    "type": "countdown",
+    "id": "ruck-roll",
+    "title": "Legacy Ruck & Roll",
+    "date": "2026-06-06"
+  },
+  {
+    "type": "metric",
+    "id": "sponsors",
+    "title": "Sponsors Committed",
+    "value": 0,
+    "total": 8
+  },
+  {
+    "type": "metric",
+    "id": "registrations",
+    "title": "Registrations",
+    "value": 0
+  }
+]

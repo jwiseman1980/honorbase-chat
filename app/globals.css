@@ -1,26 +1,46 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-gold: #c5a55a;
+  --color-app-bg: #0f0f0f;
+  --color-dashboard-bg: #141414;
+  --color-input-bg: #141414;
+  --color-input-field: #1e1e1e;
+  --color-assistant-bubble: #1e1e1e;
+  --color-user-bubble: #8b6b35;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+html, body {
+  height: 100%;
+  height: 100dvh;
+  background: #0f0f0f;
+  color: #e5e7eb;
+  overscroll-behavior: none;
 }
+
+/* Hide scrollbar but keep scroll */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Safe area for iPhone home bar */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Dashboard card base */
+.dashboard-card {
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 12px 14px;
+  min-height: 90px;
+}
+
+/* Bounce animation delays */
+.animate-bounce:nth-child(1) { animation-delay: 0ms; }
+.animate-bounce:nth-child(2) { animation-delay: 150ms; }
+.animate-bounce:nth-child(3) { animation-delay: 300ms; }

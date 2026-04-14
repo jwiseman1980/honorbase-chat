@@ -11,11 +11,7 @@ import TypingIndicator from "./components/TypingIndicator";
 function parseDashboardBlocks(text: string): { blocks: (Card & { action?: string })[] } {
   const blocks: (Card & { action?: string })[] = [];
   text.replace(/```dashboard\n([\s\S]*?)```/g, (_, json) => {
-    try {
-      blocks.push(JSON.parse(json.trim()));
-    } catch {
-      /* ignore malformed */
-    }
+    try { blocks.push(JSON.parse(json.trim())); } catch { /* ignore */ }
     return "";
   });
   return { blocks };
@@ -40,7 +36,52 @@ function NoAccess() {
   );
 }
 
-// ─── Attachment preview (before sending) ─────────────────────────────────────
+// ─── Admin org picker ─────────────────────────────────────────────────────────
+const ADMIN_ORGS = [
+  { id: "drmf", name: "Drew Ross Memorial Foundation", subtitle: "Sarah Ross Geisen · DRMF", color: "#c5a55a" },
+  { id: "steelhearts", name: "Steel Hearts Foundation", subtitle: "Kristin Hughes · Board Member", color: "#dc2626" },
+];
+
+function AdminPicker({ onSelect }: { onSelect: (orgId: string) => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh bg-app-bg px-6">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center">
+            <span className="text-gold text-lg font-bold">H</span>
+          </div>
+          <div>
+            <h1 className="text-white text-base font-semibold">HonorBase Admin</h1>
+            <p className="text-gray-500 text-xs">Joseph Wiseman · Platform Admin</p>
+          </div>
+        </div>
+        <p className="text-gray-400 text-sm mb-6">Select an organization:</p>
+        <div className="flex flex-col gap-3">
+          {ADMIN_ORGS.map((org) => (
+            <button
+              key={org.id}
+              onClick={() => onSelect(org.id)}
+              className="w-full text-left p-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-2 h-8 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: org.color }}
+                />
+                <div>
+                  <p className="text-white text-sm font-medium">{org.name}</p>
+                  <p className="text-gray-500 text-xs mt-0.5">{org.subtitle}</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Attachment preview ───────────────────────────────────────────────────────
 interface PendingAttachment {
   type: "image" | "file";
   filename: string;
@@ -63,11 +104,8 @@ function AttachmentPreview({
         <div key={i} className="relative">
           {att.type === "image" && att.previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={att.previewUrl}
-              alt={att.filename}
-              className="w-16 h-16 object-cover rounded-xl border border-white/10"
-            />
+            <img src={att.previewUrl} alt={att.filename}
+              className="w-16 h-16 object-cover rounded-xl border border-white/10" />
           ) : (
             <div className="flex items-center gap-1.5 bg-white/10 rounded-xl px-2 py-1.5 text-xs text-gray-300">
               <span className="text-gold font-bold text-[10px]">
@@ -79,22 +117,31 @@ function AttachmentPreview({
           <button
             onClick={() => onRemove(i)}
             className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gray-700 rounded-full flex items-center justify-center text-gray-300 hover:text-white text-[10px]"
-          >
-            ×
-          </button>
+          >×</button>
         </div>
       ))}
     </div>
   );
 }
 
-// ─── Main chat page ───────────────────────────────────────────────────────────
-function ChatApp({ orgId }: { orgId: string }) {
+// ─── Main chat app ────────────────────────────────────────────────────────────
+function ChatApp({
+  orgId,
+  greeting,
+  accentColor,
+  onBack,
+}: {
+  orgId: string;
+  greeting: string;
+  accentColor: string;
+  onBack?: () => void;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -102,25 +149,21 @@ function ChatApp({ orgId }: { orgId: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load conversation + dashboard on mount
   useEffect(() => {
     fetch(`/api/chat?orgId=${orgId}`)
       .then((r) => r.json())
       .then((msgs) => setMessages(msgs || []))
       .catch(() => {});
-
     fetch(`/api/dashboard?orgId=${orgId}`)
       .then((r) => r.json())
       .then((c) => setCards(c || []))
       .catch(() => {});
   }, [orgId]);
 
-  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, toolStatus]);
 
-  // Auto-grow textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = textareaRef.current;
@@ -130,7 +173,6 @@ function ChatApp({ orgId }: { orgId: string }) {
     }
   };
 
-  // Apply dashboard card update
   const applyCardAction = useCallback(
     async (action: string, card: Card) => {
       const res = await fetch("/api/dashboard", {
@@ -138,64 +180,42 @@ function ChatApp({ orgId }: { orgId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orgId, action, card }),
       });
-      const updated = await res.json();
-      setCards(updated);
+      setCards(await res.json());
     },
     [orgId]
   );
 
-  // Handle file/image selection
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-
     setUploading(true);
-    const newAttachments: PendingAttachment[] = [];
-
+    const newAtts: PendingAttachment[] = [];
     for (const file of files) {
-      const isImage = file.type.startsWith("image/");
-
-      if (isImage) {
-        // Convert to base64 for Claude vision
+      if (file.type.startsWith("image/")) {
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(",")[1]);
-          };
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
           reader.readAsDataURL(file);
         });
-        const previewUrl = `data:${file.type};base64,${base64}`;
-        newAttachments.push({
+        newAtts.push({
           type: "image",
           filename: file.name,
-          previewUrl,
+          previewUrl: `data:${file.type};base64,${base64}`,
           data: base64,
           mediaType: file.type,
         });
       } else {
-        // Upload non-image files to server
         const form = new FormData();
         form.append("file", file);
         form.append("orgId", orgId);
         const res = await fetch("/api/upload", { method: "POST", body: form });
         const json = await res.json();
-        newAttachments.push({
-          type: "file",
-          filename: file.name,
-          savedAs: json.savedAs,
-          filePath: json.path,
-        } as PendingAttachment);
+        newAtts.push({ type: "file", filename: file.name, ...json } as PendingAttachment);
       }
     }
-
-    setAttachments((prev) => [...prev, ...newAttachments]);
+    setAttachments((prev) => [...prev, ...newAtts]);
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const removeAttachment = (i: number) => {
-    setAttachments((prev) => prev.filter((_, idx) => idx !== i));
   };
 
   const sendMessage = async () => {
@@ -203,7 +223,6 @@ function ChatApp({ orgId }: { orgId: string }) {
     if (!text && !attachments.length) return;
     if (streaming) return;
 
-    // Build content for this user message
     let userContent: MessageContent;
     if (!attachments.length) {
       userContent = text;
@@ -211,12 +230,7 @@ function ChatApp({ orgId }: { orgId: string }) {
       const parts: Array<{ type: string; text?: string; data?: string; mediaType?: string; filename?: string; previewUrl?: string }> = [];
       for (const att of attachments) {
         if (att.type === "image") {
-          parts.push({
-            type: "image",
-            data: att.data,
-            mediaType: att.mediaType,
-            previewUrl: att.previewUrl,
-          });
+          parts.push({ type: "image", data: att.data, mediaType: att.mediaType, previewUrl: att.previewUrl });
         } else {
           parts.push({ type: "file", filename: att.filename });
         }
@@ -232,10 +246,8 @@ function ChatApp({ orgId }: { orgId: string }) {
     setAttachments([]);
     setStreaming(true);
     setStreamingText("");
-
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    setToolStatus(null);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
       const res = await fetch("/api/chat", {
@@ -243,8 +255,8 @@ function ChatApp({ orgId }: { orgId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: updatedMessages, orgId }),
       });
-
       if (!res.body) throw new Error("No stream");
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
@@ -252,17 +264,19 @@ function ChatApp({ orgId }: { orgId: string }) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
+        for (const line of decoder.decode(value).split("\n")) {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            if (data.tool) {
+              setToolStatus(
+                data.tool === "web_search" ? "Searching the web..." : "Reading page..."
+              );
+            }
             if (data.text) {
               accumulated += data.text;
               setStreamingText(accumulated);
+              setToolStatus(null);
             }
             if (data.done) {
               const { blocks } = parseDashboardBlocks(accumulated);
@@ -270,22 +284,18 @@ function ChatApp({ orgId }: { orgId: string }) {
                 const { action, ...card } = block;
                 await applyCardAction(action ?? "add", card as Card);
               }
-              const assistantMsg: Message = {
-                role: "assistant",
-                content: accumulated,
-              };
-              setMessages([...updatedMessages, assistantMsg]);
+              setMessages([...updatedMessages, { role: "assistant", content: accumulated }]);
               setStreamingText("");
               setStreaming(false);
+              setToolStatus(null);
             }
-          } catch {
-            /* skip malformed */
-          }
+          } catch { /* skip malformed */ }
         }
       }
     } catch {
       setStreaming(false);
       setStreamingText("");
+      setToolStatus(null);
     }
   };
 
@@ -298,6 +308,23 @@ function ChatApp({ orgId }: { orgId: string }) {
 
   return (
     <div className="flex flex-col h-dvh bg-app-bg overflow-hidden">
+      {/* ── Top bar (admin back button) ── */}
+      {onBack && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-white/5">
+          <button
+            onClick={onBack}
+            className="text-gray-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+            All orgs
+          </button>
+          <span className="text-gray-600 text-sm">·</span>
+          <span className="text-gray-400 text-sm">{orgId === "drmf" ? "DRMF" : "Steel Hearts"}</span>
+        </div>
+      )}
+
       {/* ── Dashboard ── */}
       {cards.length > 0 && (
         <div className="flex-shrink-0 border-b border-white/5 bg-dashboard-bg">
@@ -315,32 +342,33 @@ function ChatApp({ orgId }: { orgId: string }) {
       <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2">
         {messages.length === 0 && !streaming && (
           <div className="flex flex-col items-center justify-center h-full text-center pb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mb-4">
-              <span className="text-gold text-xl font-bold">H</span>
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 border"
+              style={{ backgroundColor: `${accentColor}1a`, borderColor: `${accentColor}4d` }}
+            >
+              <span className="text-xl font-bold" style={{ color: accentColor }}>H</span>
             </div>
-            <p className="text-gray-400 text-sm max-w-xs">
-              Hi Sarah — I&apos;m your DRMF Operator. Ask me anything about the Ruck &amp; Roll, or just say hi.
-            </p>
+            <p className="text-gray-400 text-sm max-w-xs">{greeting}</p>
           </div>
         )}
         {messages.map((msg, i) => (
           <MessageBubble key={i} message={msg} />
         ))}
-        {streaming && !streamingText && <TypingIndicator />}
+        {streaming && !streamingText && (
+          <TypingIndicator label={toolStatus ?? undefined} />
+        )}
         {streaming && streamingText && (
-          <MessageBubble
-            message={{ role: "assistant", content: streamingText }}
-          />
+          <MessageBubble message={{ role: "assistant", content: streamingText }} />
         )}
         <div ref={bottomRef} />
       </div>
 
       {/* ── Input area ── */}
       <div className="flex-shrink-0 border-t border-white/5 bg-input-bg px-3 pb-safe">
-        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-
+        <AttachmentPreview attachments={attachments} onRemove={(i) =>
+          setAttachments((prev) => prev.filter((_, idx) => idx !== i))
+        } />
         <div className="flex items-end gap-2 py-3">
-          {/* Attachment button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
@@ -358,8 +386,6 @@ function ChatApp({ orgId }: { orgId: string }) {
               </svg>
             )}
           </button>
-
-          {/* Hidden file input — supports camera capture on mobile */}
           <input
             ref={fileInputRef}
             type="file"
@@ -368,19 +394,15 @@ function ChatApp({ orgId }: { orgId: string }) {
             className="hidden"
             onChange={handleFileSelect}
           />
-
-          {/* Text input */}
           <textarea
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="Message DRMF Operator..."
+            placeholder={`Message ${orgId === "drmf" ? "DRMF" : "Steel Hearts"} Operator...`}
             rows={1}
             className="flex-1 resize-none bg-input-field rounded-2xl px-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none border border-white/5 focus:border-gold/30 transition-colors leading-relaxed max-h-40"
           />
-
-          {/* Send button */}
           <button
             onClick={sendMessage}
             disabled={streaming || (!input.trim() && !attachments.length)}
@@ -388,8 +410,8 @@ function ChatApp({ orgId }: { orgId: string }) {
             style={{
               backgroundColor:
                 streaming || (!input.trim() && !attachments.length)
-                  ? "rgba(197,165,90,0.2)"
-                  : "#c5a55a",
+                  ? `${accentColor}33`
+                  : accentColor,
             }}
             aria-label="Send"
           >
@@ -398,27 +420,60 @@ function ChatApp({ orgId }: { orgId: string }) {
             </svg>
           </button>
         </div>
-
-        <p className="text-center text-[10px] text-gray-600 pb-2">
-          Powered by HonorBase
-        </p>
+        <p className="text-center text-[10px] text-gray-600 pb-2">Powered by HonorBase</p>
       </div>
     </div>
   );
 }
 
-// ─── Token gate ───────────────────────────────────────────────────────────────
-const VALID_TOKENS: Record<string, string> = {
-  "drmf-2026-sarah": "drmf",
+// ─── Token → org mapping ─────────────────────────────────────────────────────
+
+const VALID_TOKENS: Record<string, { orgId: string; greeting: string; accentColor: string }> = {
+  "drmf-2026-sarah": {
+    orgId: "drmf",
+    greeting: "Hi Sarah — I know your org, I know what's coming up. What do you need help with most right now?",
+    accentColor: "#c5a55a",
+  },
+  "sh-2026-kristin": {
+    orgId: "steelhearts",
+    greeting: "Hi Kristin — your Steel Hearts Operator is ready. What do you need?",
+    accentColor: "#dc2626",
+  },
 };
+
+const ADMIN_TOKEN = "hb-admin-joseph-2026";
+
+// ─── Gate logic ───────────────────────────────────────────────────────────────
 
 function ChatGate() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
-  const orgId = VALID_TOKENS[token];
 
-  if (!orgId) return <NoAccess />;
-  return <ChatApp orgId={orgId} />;
+  // Admin view
+  const [adminOrg, setAdminOrg] = useState<string | null>(null);
+  if (token === ADMIN_TOKEN) {
+    if (!adminOrg) return <AdminPicker onSelect={setAdminOrg} />;
+    const adminOrgConfig = ADMIN_ORGS.find((o) => o.id === adminOrg)!;
+    return (
+      <ChatApp
+        orgId={adminOrg}
+        greeting={adminOrgConfig?.subtitle ?? ""}
+        accentColor={adminOrgConfig?.color ?? "#c5a55a"}
+        onBack={() => setAdminOrg(null)}
+      />
+    );
+  }
+
+  // Normal user view
+  const config = VALID_TOKENS[token];
+  if (!config) return <NoAccess />;
+  return (
+    <ChatApp
+      orgId={config.orgId}
+      greeting={config.greeting}
+      accentColor={config.accentColor}
+    />
+  );
 }
 
 export default function Page() {

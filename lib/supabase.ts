@@ -1,12 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Server-side only — never import this in client components.
+// Client is lazily initialized so the module can be imported at build time
+// without env vars (API routes are never statically executed by Next.js).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _client: ReturnType<typeof createClient<any>> | null = null;
 
-// Server-side only — never import this in client components
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
-});
+function getClient() {
+  if (_client) return _client;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _client = createClient<any>(url, key, { auth: { persistSession: false } });
+  return _client;
+}
 
 type Message = { role: string; content: unknown };
 type Card = { id: string; [key: string]: unknown };
@@ -15,13 +23,15 @@ type Card = { id: string; [key: string]: unknown };
 
 export async function loadMessages(orgId: string): Promise<Message[]> {
   try {
-    const { data, error } = await supabase
+    const sb = getClient();
+    if (!sb) return [];
+    const { data, error } = await sb
       .from("hb_messages")
       .select("role, content")
       .eq("org_id", orgId)
       .order("created_at", { ascending: true });
 
-    if (error) return []; // table may not exist yet — silent fallback
+    if (error) return [];
     return (data ?? []) as Message[];
   } catch {
     return [];
@@ -30,9 +40,11 @@ export async function loadMessages(orgId: string): Promise<Message[]> {
 
 export async function saveMessage(orgId: string, role: string, content: unknown) {
   try {
-    await supabase.from("hb_messages").insert({ org_id: orgId, role, content });
+    const sb = getClient();
+    if (!sb) return;
+    await sb.from("hb_messages").insert({ org_id: orgId, role, content });
   } catch {
-    // silent — conversation still works, just not persisted
+    // silent
   }
 }
 
@@ -40,7 +52,9 @@ export async function saveMessage(orgId: string, role: string, content: unknown)
 
 export async function loadCards(orgId: string): Promise<Card[]> {
   try {
-    const { data, error } = await supabase
+    const sb = getClient();
+    if (!sb) return [];
+    const { data, error } = await sb
       .from("hb_dashboard_cards")
       .select("card_id, data")
       .eq("org_id", orgId)
@@ -55,7 +69,9 @@ export async function loadCards(orgId: string): Promise<Card[]> {
 
 export async function upsertCard(orgId: string, card: Card) {
   try {
-    await supabase.from("hb_dashboard_cards").upsert({
+    const sb = getClient();
+    if (!sb) return;
+    await sb.from("hb_dashboard_cards").upsert({
       org_id: orgId,
       card_id: card.id,
       data: { ...card, updated_at: new Date().toISOString() },
@@ -67,7 +83,9 @@ export async function upsertCard(orgId: string, card: Card) {
 
 export async function deleteCard(orgId: string, cardId: string) {
   try {
-    await supabase
+    const sb = getClient();
+    if (!sb) return;
+    await sb
       .from("hb_dashboard_cards")
       .delete()
       .eq("org_id", orgId)

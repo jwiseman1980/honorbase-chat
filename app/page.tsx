@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { useSession, signOut } from "next-auth/react";
 import DashboardCard, { Card } from "./components/DashboardCard";
 import MessageBubble, { Message, MessageContent } from "./components/MessageBubble";
 import TypingIndicator from "./components/TypingIndicator";
@@ -17,21 +16,11 @@ function parseDashboardBlocks(text: string): { blocks: (Card & { action?: string
   return { blocks };
 }
 
-// ─── No-token screen ─────────────────────────────────────────────────────────
-function NoAccess() {
+// ─── Loading screen ───────────────────────────────────────────────────────────
+function LoadingScreen() {
   return (
-    <div className="flex flex-col items-center justify-center h-dvh bg-app-bg text-center px-8">
-      <div className="w-16 h-16 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mb-6">
-        <span className="text-gold text-2xl font-bold">H</span>
-      </div>
-      <h1 className="text-white text-xl font-semibold mb-2">HonorBase Operator</h1>
-      <p className="text-gray-400 text-sm leading-relaxed max-w-xs">
-        Contact{" "}
-        <a href="mailto:hello@honorbase.app" className="text-gold underline">
-          hello@honorbase.app
-        </a>{" "}
-        to get started.
-      </p>
+    <div className="flex items-center justify-center h-dvh bg-app-bg">
+      <div className="w-8 h-8 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
     </div>
   );
 }
@@ -46,14 +35,22 @@ function AdminPicker({ onSelect }: { onSelect: (orgId: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-dvh bg-app-bg px-6">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center">
-            <span className="text-gold text-lg font-bold">H</span>
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center">
+              <span className="text-gold text-lg font-bold">H</span>
+            </div>
+            <div>
+              <h1 className="text-white text-base font-semibold">HonorBase Admin</h1>
+              <p className="text-gray-500 text-xs">Joseph Wiseman · Platform Admin</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-white text-base font-semibold">HonorBase Admin</h1>
-            <p className="text-gray-500 text-xs">Joseph Wiseman · Platform Admin</p>
-          </div>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="text-gray-600 hover:text-gray-400 text-xs transition-colors"
+          >
+            Sign out
+          </button>
         </div>
         <p className="text-gray-400 text-sm mb-6">Select an organization:</p>
         <div className="flex flex-col gap-3">
@@ -426,32 +423,19 @@ function ChatApp({
   );
 }
 
-// ─── Token → org mapping ─────────────────────────────────────────────────────
-
-const VALID_TOKENS: Record<string, { orgId: string; greeting: string; accentColor: string }> = {
-  "drmf-2026-sarah": {
-    orgId: "drmf",
-    greeting: "Hi Sarah — I know your org, I know what's coming up. What do you need help with most right now?",
-    accentColor: "#c5a55a",
-  },
-  "sh-2026-kristin": {
-    orgId: "steelhearts",
-    greeting: "Hi Kristin — your Steel Hearts Operator is ready. What do you need?",
-    accentColor: "#dc2626",
-  },
-};
-
-const ADMIN_TOKEN = "hb-admin-joseph-2026";
-
-// ─── Gate logic ───────────────────────────────────────────────────────────────
+// ─── Session-based gate ───────────────────────────────────────────────────────
 
 function ChatGate() {
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
-
-  // Admin view
+  const { data: session, status } = useSession();
   const [adminOrg, setAdminOrg] = useState<string | null>(null);
-  if (token === ADMIN_TOKEN) {
+
+  if (status === "loading") return <LoadingScreen />;
+
+  const userConfig = session?.userConfig;
+  if (!userConfig) return <LoadingScreen />;
+
+  // Superadmin sees org picker
+  if (userConfig.role === "superadmin") {
     if (!adminOrg) return <AdminPicker onSelect={setAdminOrg} />;
     const adminOrgConfig = ADMIN_ORGS.find((o) => o.id === adminOrg)!;
     return (
@@ -464,22 +448,16 @@ function ChatGate() {
     );
   }
 
-  // Normal user view
-  const config = VALID_TOKENS[token];
-  if (!config) return <NoAccess />;
+  // Regular user goes straight to their org
   return (
     <ChatApp
-      orgId={config.orgId}
-      greeting={config.greeting}
-      accentColor={config.accentColor}
+      orgId={userConfig.orgId!}
+      greeting={userConfig.greeting}
+      accentColor={userConfig.accentColor}
     />
   );
 }
 
 export default function Page() {
-  return (
-    <Suspense>
-      <ChatGate />
-    </Suspense>
-  );
+  return <ChatGate />;
 }

@@ -3,8 +3,8 @@ export const steelHeartsConfig = {
   orgId: "steelhearts",
   orgName: "Steel Hearts Foundation",
   accentColor: "#dc2626",
-  // Google Workspace account to impersonate via service account domain-wide delegation
-  googleWorkspaceEmail: "joseph.wiseman@steel-hearts.org",
+  // No hardcoded googleWorkspaceEmail — the route derives it from the logged-in user's
+  // session email (steel-hearts.org domain) so each user sees their own inbox/calendar.
   greeting: "Hi Kristin — your Steel Hearts Operator is ready. What do you need?",
 
   systemPrompt: `You are Steel Hearts Operator — an AI operations assistant for the Steel Hearts Foundation.
@@ -66,8 +66,8 @@ Card types: countdown, metric, list, note. Dashboard blocks are invisible in cha
 
 You have direct access to the following integrated tools — use them proactively:
 
-- **gmail** — Read Joseph's steel-hearts.org email inbox. When asked about email, messages, or anything that might be in email, use this tool.
-- **google_calendar** — View upcoming events on Joseph's Google Calendar.
+- **gmail** — Read your steel-hearts.org email inbox. When asked about email, messages, or anything that might be in email, use this tool.
+- **google_calendar** — View upcoming events on your Google Calendar.
 - **slack** — Read messages from the Steel Hearts Slack workspace (list channels or read a channel).
 - **web_search** — Search the web for current information.
 - **web_fetch** — Fetch the content of a specific URL.

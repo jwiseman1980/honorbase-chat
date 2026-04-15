@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getOrgById } from "@/config/orgs/index.js";
 import { loadMessages, saveMessage } from "@/lib/supabase";
+import { auth } from "@/auth";
 import fs from "fs";
 import path from "path";
 
@@ -593,7 +594,18 @@ export async function POST(req: NextRequest) {
   // Filter tools based on org's disabledTools list
   const disabledTools: string[] = org.disabledTools || [];
   const orgTools = ALL_TOOLS.filter((t) => !disabledTools.includes(t.name));
-  const orgEmail: string | undefined = org.googleWorkspaceEmail;
+
+  // Determine which email to impersonate for Gmail/Calendar.
+  // The Steel Hearts service account has domain-wide delegation for steel-hearts.org,
+  // so we impersonate the LOGGED-IN user's email when they're on that domain.
+  // For other domains the service account can't impersonate, so fall back to any
+  // org-level config (e.g. a dedicated service inbox), or leave undefined to disable.
+  const session = await auth();
+  const sessionEmail = session?.user?.email;
+  const orgEmail: string | undefined =
+    sessionEmail?.endsWith("@steel-hearts.org")
+      ? sessionEmail
+      : org.googleWorkspaceEmail;
 
   const anthropicMessages = toAnthropicMessages(messages);
   const encoder = new TextEncoder();

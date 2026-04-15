@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getOrgById } from "@/config/orgs/index.js";
-import { loadMessages, saveMessage } from "@/lib/supabase";
+import { loadMessages, saveMessage, saveBuildQueueItem } from "@/lib/supabase";
 import { auth } from "@/auth";
 import fs from "fs";
 import path from "path";
@@ -607,6 +607,18 @@ export async function POST(req: NextRequest) {
       ? sessionEmail
       : org.googleWorkspaceEmail;
 
+  // Append build-request tracking instruction to system prompt
+  const BUILD_REQUEST_SUFFIX = `
+
+---
+PLATFORM INSTRUCTION: When a user asks for something you genuinely cannot do due to platform limitations (a tool not available, a feature that doesn't exist, an integration not configured), emit a build request block at the very start of your response — before any other text:
+\`\`\`build_request
+{"description":"<concise description of what the user wanted>","requested_by_org":"${orgId}","priority":"medium","source":"chat"}
+\`\`\`
+These blocks are automatically stripped before the user sees your reply and logged for the platform admin. Only emit this when you truly cannot fulfill the request due to platform capabilities — not when you're choosing not to do something.`;
+
+  const systemPrompt = org.systemPrompt + BUILD_REQUEST_SUFFIX;
+
   const anthropicMessages = toAnthropicMessages(messages);
   const encoder = new TextEncoder();
 
@@ -622,7 +634,7 @@ export async function POST(req: NextRequest) {
 
         const fullText = await runAgentLoop(
           anthropicMessages,
-          org.systemPrompt,
+          systemPrompt,
           orgTools,
           orgEmail,
           (toolName) => {
@@ -635,15 +647,30 @@ export async function POST(req: NextRequest) {
           }
         );
 
-        // Parse and persist build_requests (best-effort, no Vercel filesystem)
-        const buildMatches = fullText.matchAll(/```build_request\n([\s\S]*?)```/g);
-        for (const match of buildMatches) {
+        // Extract and strip build_request blocks before sending to user
+        const buildRequestRe = /```build_request\n([\s\S]*?)```\n?/g;
+        const buildRequests: Record<string, unknown>[] = [];
+        for (const match of fullText.matchAll(buildRequestRe)) {
           try {
-            const br = JSON.parse(match[1].trim());
-            saveBuildRequest(orgId, br);
+            buildRequests.push(JSON.parse(match[1].trim()));
           } catch {
             /* skip malformed */
           }
+        }
+        // Remove build_request blocks from visible text
+        const cleanText = fullText.replace(buildRequestRe, "").trim();
+
+        // Persist build requests: Supabase first, local fs as fallback
+        for (const br of buildRequests) {
+          saveBuildQueueItem({
+            description: (br.description as string) || "Unmet user request",
+            requested_by_org: (br.requested_by_org as string) || orgId,
+            priority: (br.priority as string) || "medium",
+            status: "backlog",
+            source: "chat",
+            notes: null,
+          });
+          saveBuildRequest(orgId, br); // local fallback for dev
         }
 
         // Persist to Supabase (fire-and-forget)
@@ -651,18 +678,18 @@ export async function POST(req: NextRequest) {
         if (lastUserMsg) {
           saveMessage(orgId, "user", lastUserMsg.content);
         }
-        saveMessage(orgId, "assistant", fullText);
+        saveMessage(orgId, "assistant", cleanText);
 
         // Also persist locally for dev
         const updatedMessages = [
           ...messages,
-          { role: "assistant", content: fullText },
+          { role: "assistant", content: cleanText },
         ];
         saveLocalConversation(orgId, updatedMessages);
 
         // Emit text as a single chunk (agentic responses don't stream char-by-char)
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ text: fullText })}\n\n`)
+          encoder.encode(`data: ${JSON.stringify({ text: cleanText })}\n\n`)
         );
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`)

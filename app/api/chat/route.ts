@@ -3,6 +3,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getOrgById } from "@/config/orgs/index.js";
 import { loadMessages, saveMessage, saveBuildQueueItem } from "@/lib/supabase";
 import { auth } from "@/auth";
+import { logToStream } from "@/lib/stream";
+import { detectFriction } from "@/lib/friction";
 import fs from "fs";
 import path from "path";
 
@@ -537,6 +539,14 @@ async function runAgentLoop(
   return "I hit a tool-use limit. Please try rephrasing your question.";
 }
 
+function extractTextContent(content: IncomingMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((p) => p.type === "text" && p.text)
+    .map((p) => p.text!)
+    .join(" ");
+}
+
 // ── File-based fallback (local dev only) ─────────────────────────────────────
 
 function loadLocalConversation(orgId: string): IncomingMessage[] {
@@ -647,6 +657,43 @@ These blocks are automatically stripped before the user sees your reply and logg
           }
         );
 
+        // Fire-and-forget: stream logging + friction detection
+        const lastUserMsg = messages[messages.length - 1];
+        const userText = lastUserMsg
+          ? extractTextContent(lastUserMsg.content)
+          : "";
+
+        logToStream({
+          orgId,
+          streamType: "chat_turn",
+          actor: "user",
+          title: userText.slice(0, 200),
+          metadata: {
+            model_used: "claude-sonnet-4-6",
+            turn_count: messages.length,
+            tools_used: toolsUsed,
+          },
+        });
+
+        if (userText) {
+          const friction = detectFriction(userText);
+          if (friction.detected) {
+            logToStream({
+              orgId,
+              streamType: "friction",
+              actor: "system",
+              title: `Friction detected: ${userText.slice(0, 100)}`,
+              body: `Patterns matched: ${friction.patterns.join(", ")}`,
+              metadata: {
+                confidence: friction.confidence,
+                user_message: userText,
+              },
+              importance: friction.confidence > 0.6 ? "high" : "medium",
+              tags: ["auto-detected"],
+            });
+          }
+        }
+
         // Extract and strip build_request blocks before sending to user
         const buildRequestRe = /```build_request\n([\s\S]*?)```\n?/g;
         const buildRequests: Record<string, unknown>[] = [];
@@ -674,7 +721,6 @@ These blocks are automatically stripped before the user sees your reply and logg
         }
 
         // Persist to Supabase (fire-and-forget)
-        const lastUserMsg = messages[messages.length - 1];
         if (lastUserMsg) {
           saveMessage(orgId, "user", lastUserMsg.content);
         }

@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _client: ReturnType<typeof createClient<any>> | null = null;
 
-function getClient() {
+export function getClient() {
   if (_client) return _client;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -175,6 +175,81 @@ export async function deleteBuildQueueItem(id: string): Promise<void> {
     await sb.from("build_queue").delete().eq("id", id);
   } catch {
     // silent
+  }
+}
+
+// ── Activity stream ───────────────────────────────────────────────────────────
+
+export type StreamInsert = {
+  org_id: string;
+  stream_type: string;
+  actor?: string;
+  title: string;
+  body?: string;
+  metadata?: Record<string, unknown>;
+  related_table?: string;
+  related_id?: string;
+  tags?: string[];
+  importance?: string;
+  session_id?: string;
+};
+
+export async function insertStream(entry: StreamInsert): Promise<void> {
+  try {
+    const sb = getClient();
+    if (!sb) return;
+    await sb.from("org_stream").insert({
+      ...entry,
+      actor: entry.actor || "system",
+      metadata: entry.metadata || {},
+      tags: entry.tags || [],
+      importance: entry.importance || "medium",
+    });
+  } catch {
+    // Stream failures must never surface to users
+  }
+}
+
+export async function getRecentStream(
+  orgId: string,
+  limit = 50,
+  type?: string
+): Promise<StreamInsert[]> {
+  try {
+    const sb = getClient();
+    if (!sb) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q: any = sb
+      .from("org_stream")
+      .select("*")
+      .eq("org_id", orgId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (type) q = q.eq("stream_type", type);
+    const { data } = await q;
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Org membership ────────────────────────────────────────────────────────────
+
+/** Returns true if the given email is in org_members for the given org. */
+export async function checkOrgMember(orgId: string, email: string): Promise<boolean> {
+  try {
+    const sb = getClient();
+    if (!sb) return false;
+    const { data, error } = await sb
+      .from("org_members")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("email", email)
+      .maybeSingle();
+    if (error) return false;
+    return !!data;
+  } catch {
+    return false;
   }
 }
 

@@ -33,3 +33,7 @@ export function isAdminToken(token) {
 export function getAdminUser(token) {
   return adminTokens[token] || null;
 }
+
+export function getAllOrgs() {
+  return Object.values(orgs);
+}

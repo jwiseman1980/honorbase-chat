@@ -178,6 +178,26 @@ export async function deleteBuildQueueItem(id: string): Promise<void> {
   }
 }
 
+// ── Org membership ────────────────────────────────────────────────────────────
+
+/** Returns true if the given email is in org_members for the given org. */
+export async function checkOrgMember(orgId: string, email: string): Promise<boolean> {
+  try {
+    const sb = getClient();
+    if (!sb) return false;
+    const { data, error } = await sb
+      .from("org_members")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("email", email)
+      .maybeSingle();
+    if (error) return false;
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
 // ── Org stats ─────────────────────────────────────────────────────────────────
 
 export type OrgStat = {

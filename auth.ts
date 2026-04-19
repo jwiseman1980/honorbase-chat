@@ -47,8 +47,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     signIn({ user }) {
-      // Only allow whitelisted emails
-      return !!(user.email && user.email in WHITELIST);
+      // Allow any Google account — access control is handled per-request via org_members
+      return !!user.email;
     },
     jwt({ token, user }) {
       // Always re-read from whitelist so config changes take effect without re-login

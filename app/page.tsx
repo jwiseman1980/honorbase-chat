@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useSession, signOut } from "next-auth/react";
+import { useSession, signIn, signOut } from "next-auth/react";
 import ChatApp from "./components/ChatApp";
 import ArchitectDashboard from "./components/ArchitectDashboard";
 
@@ -10,6 +10,57 @@ function LoadingScreen() {
   return (
     <div className="flex items-center justify-center h-dvh bg-app-bg">
       <div className="w-8 h-8 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
+    </div>
+  );
+}
+
+// ─── Not-authenticated screen ─────────────────────────────────────────────────
+function SignInScreen() {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh bg-app-bg px-8">
+      <div className="w-full max-w-xs text-center">
+        <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mx-auto mb-5">
+          <span className="text-gold text-xl font-bold">H</span>
+        </div>
+        <h1 className="text-white text-lg font-semibold mb-1">HonorBase Operator</h1>
+        <p className="text-gray-500 text-sm mb-8">AI operations for mission-driven orgs</p>
+        <button
+          onClick={() => signIn("google")}
+          className="w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl bg-white hover:bg-gray-100 transition-colors text-gray-900 text-sm font-medium"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+            <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853" />
+            <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05" />
+            <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
+          </svg>
+          Sign in with Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── No-org screen (authenticated but not provisioned) ────────────────────────
+function NoOrgScreen({ email }: { email?: string | null }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh bg-app-bg px-8">
+      <div className="w-full max-w-xs text-center">
+        <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-5">
+          <span className="text-gray-500 text-xl font-bold">H</span>
+        </div>
+        <h1 className="text-white text-base font-semibold mb-2">You&apos;re not set up yet</h1>
+        {email && <p className="text-gray-600 text-xs mb-3">Signed in as {email}</p>}
+        <p className="text-gray-500 text-sm">
+          Contact your HonorBase administrator to get access to your organization.
+        </p>
+        <button
+          onClick={() => signOut({ callbackUrl: "/" })}
+          className="mt-8 text-sm text-gray-600 hover:text-gray-400 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }
@@ -96,9 +147,11 @@ function ChatGate() {
   const [adminOrg, setAdminOrg] = useState<string | null>(null);
 
   if (status === "loading") return <LoadingScreen />;
+  if (status === "unauthenticated") return <SignInScreen />;
 
   const userConfig = session?.userConfig;
-  if (!userConfig) return <LoadingScreen />;
+  // Authenticated but not provisioned to any org
+  if (!userConfig) return <NoOrgScreen email={session?.user?.email} />;
 
   // Superadmin sees org picker
   if (userConfig.role === "superadmin") {
